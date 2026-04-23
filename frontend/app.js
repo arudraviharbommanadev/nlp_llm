@@ -3,6 +3,9 @@ const state = {
   pipelineStages: [],
   sidebarOpen: true,
   requestInFlight: false,
+  currentSessionId: null,
+  orchestratorRuns: [],
+  activeTrace: null,
 };
 
 const chatLog = document.getElementById("chatLog");
@@ -13,6 +16,12 @@ const statusText = document.getElementById("statusText");
 const pipelineStages = document.getElementById("pipelineStages");
 const historyList = document.getElementById("historyList");
 const historyCount = document.getElementById("historyCount");
+const historyTabButton = document.getElementById("historyTabButton");
+const personalizeTabButton = document.getElementById("personalizeTabButton");
+const historyPanel = document.getElementById("historyPanel");
+const personalizePanel = document.getElementById("personalizePanel");
+const themeButtons = document.querySelectorAll("[data-theme-option]");
+const fontSelect = document.getElementById("fontSelect");
 const newSessionButton = document.getElementById("newSessionButton");
 const endSessionButton = document.getElementById("endSessionButton");
 const sidebar = document.getElementById("sidebar");
@@ -20,19 +29,57 @@ const openSidebarButton = document.getElementById("openSidebarButton");
 const closeSidebarButton = document.getElementById("closeSidebarButton");
 const intentPill = document.getElementById("intentPill");
 const modelPill = document.getElementById("modelPill");
+const ragPill = document.getElementById("ragPill");
+const queryTypeBadge = document.getElementById("queryTypeBadge");
+const secondaryIntentList = document.getElementById("secondaryIntentList");
+const taskList = document.getElementById("taskList");
 
-const stageOrder = ["intake", "preprocess", "intent", "routing", "knowledge", "semantic", "generation"];
+const stageOrder = ["intake", "preprocess", "orchestration", "routing", "retrieval", "task_execution", "aggregation", "final_response"];
+const THEME_STORAGE_KEY = "study_theme";
+const FONT_STORAGE_KEY = "study_font";
 let activeUtterance = null;
 let activeSpeechButton = null;
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem(THEME_STORAGE_KEY, theme);
+  themeButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.themeOption === theme);
+  });
+}
+
+function applyFont(font) {
+  document.documentElement.dataset.font = font;
+  localStorage.setItem(FONT_STORAGE_KEY, font);
+  if (fontSelect) {
+    fontSelect.value = font;
+  }
+}
+
+function initializePersonalization() {
+  const savedTheme = localStorage.getItem(THEME_STORAGE_KEY) || "blue";
+  const savedFont = localStorage.getItem(FONT_STORAGE_KEY) || "aptos";
+  applyTheme(savedTheme);
+  applyFont(savedFont);
+}
+
+function setSidebarView(view) {
+  const showHistory = view === "history";
+  historyTabButton.classList.toggle("is-active", showHistory);
+  personalizeTabButton.classList.toggle("is-active", !showHistory);
+  historyPanel.classList.toggle("hidden", !showHistory);
+  personalizePanel.classList.toggle("hidden", showHistory);
+}
 
 function setStatus(text, loading = false) {
   statusText.textContent = text;
   statusText.classList.toggle("loading", loading);
 }
 
-function setActiveModel(intent = "idle", model = "waiting") {
+function setActiveModel(intent = "idle", model = "waiting", ragMode = "none") {
   intentPill.textContent = `Intent: ${intent}`;
   modelPill.textContent = `Model: ${model}`;
+  ragPill.textContent = `RAG: ${ragMode}`;
 }
 
 function autoResizeTextarea() {
@@ -98,19 +145,24 @@ function speakMessage(content, button) {
   setStatus("Reading the response aloud...");
 }
 
-function createMessageElement(role, content) {
+function createMessageElement(message) {
   const wrapper = document.createElement("div");
-  wrapper.className = `message ${role}`;
+  wrapper.className = `message ${message.role}`;
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
 
   const body = document.createElement("div");
   body.className = "bubble-content";
-  body.textContent = content;
+  body.textContent = message.content;
   bubble.appendChild(body);
 
-  if (role === "assistant") {
+  if (message.role === "assistant") {
+    const meta = document.createElement("div");
+    meta.className = "bubble-meta";
+    meta.textContent = `${message.task_type || "answer"} • ${message.model_used || "local model"}`;
+    bubble.appendChild(meta);
+
     const actions = document.createElement("div");
     actions.className = "message-actions";
 
@@ -118,13 +170,13 @@ function createMessageElement(role, content) {
     copyButton.type = "button";
     copyButton.className = "message-action-button";
     copyButton.textContent = "Copy";
-    copyButton.addEventListener("click", () => copyMessage(content, copyButton));
+    copyButton.addEventListener("click", () => copyMessage(message.content, copyButton));
 
     const speakButton = document.createElement("button");
     speakButton.type = "button";
     speakButton.className = "message-action-button";
     speakButton.textContent = "Speak";
-    speakButton.addEventListener("click", () => speakMessage(content, speakButton));
+    speakButton.addEventListener("click", () => speakMessage(message.content, speakButton));
 
     actions.appendChild(copyButton);
     actions.appendChild(speakButton);
@@ -146,7 +198,7 @@ function renderMessages() {
   emptyState.classList.add("hidden");
 
   state.messages.forEach((message) => {
-    chatLog.appendChild(createMessageElement(message.role, message.content));
+    chatLog.appendChild(createMessageElement(message));
   });
 
   chatLog.scrollTop = chatLog.scrollHeight;
@@ -156,14 +208,16 @@ function renderPipeline() {
   pipelineStages.innerHTML = "";
 
   if (state.pipelineStages.length === 0) {
-    pipelineStages.innerHTML = `
-      <article class="pipeline-stage">
-        <div class="pipeline-stage-status">Waiting</div>
-        <h4>Pipeline idle</h4>
-        <p>Submit a prompt to watch each NLP stage update in sequence.</p>
-      </article>
-    `;
+    const pipelinePanel = document.querySelector(".pipeline-panel");
+    if (pipelinePanel) {
+      pipelinePanel.classList.add("hidden");
+    }
     return;
+  }
+
+  const pipelinePanel = document.querySelector(".pipeline-panel");
+  if (pipelinePanel) {
+    pipelinePanel.classList.remove("hidden");
   }
 
   state.pipelineStages.forEach((stage) => {
@@ -178,10 +232,78 @@ function renderPipeline() {
   });
 }
 
+function renderTrace(trace = null) {
+  state.activeTrace = trace;
+  if (!trace) {
+    queryTypeBadge.textContent = "idle";
+    secondaryIntentList.innerHTML = `<span class="trace-chip muted">None</span>`;
+    taskList.innerHTML = `
+      <article class="task-card">
+        <div class="task-card-top">
+          <strong>No tasks</strong>
+          <span class="task-priority">P0</span>
+        </div>
+        <p>Tasks will appear here.</p>
+      </article>
+    `;
+    setActiveModel();
+    return;
+  }
+
+  queryTypeBadge.textContent = trace.query_type || "simple";
+  setActiveModel(
+    trace.primary_intent || "idle",
+    trace.final_aggregation_model || "waiting",
+    trace.rag_mode || "none",
+  );
+
+  secondaryIntentList.innerHTML = "";
+  const secondaryIntents = trace.secondary_intents || [];
+  if (secondaryIntents.length === 0) {
+    secondaryIntentList.innerHTML = `<span class="trace-chip muted">None</span>`;
+  } else {
+    secondaryIntents.forEach((intent) => {
+      const chip = document.createElement("span");
+      chip.className = "trace-chip";
+      chip.textContent = intent;
+      secondaryIntentList.appendChild(chip);
+    });
+  }
+
+  taskList.innerHTML = "";
+  (trace.tasks || []).forEach((task) => {
+    const card = document.createElement("article");
+    card.className = "task-card";
+    const dependsOn = task.depends_on && task.depends_on.length
+      ? `Depends on: ${task.depends_on.join(", ")}`
+      : "Ready immediately";
+    card.innerHTML = `
+      <div class="task-card-top">
+        <strong>${task.task_type}</strong>
+        <span class="task-priority">P${task.priority}</span>
+      </div>
+      <div class="task-card-meta">${task.model}</div>
+      <p>${task.query}</p>
+      <div class="task-card-foot">${dependsOn}</div>
+    `;
+    taskList.appendChild(card);
+  });
+}
+
 function resetPipeline() {
   state.pipelineStages = [];
   renderPipeline();
-  setActiveModel();
+}
+
+function resetSession() {
+  stopSpeaking();
+  state.messages = [];
+  state.currentSessionId = null;
+  state.orchestratorRuns = [];
+  renderMessages();
+  resetPipeline();
+  renderTrace(null);
+  setStatus("New session.");
 }
 
 function upsertStage(stage) {
@@ -201,6 +323,7 @@ function upsertStage(stage) {
 function updateSidebarVisibility() {
   sidebar.classList.toggle("hidden", !state.sidebarOpen);
   openSidebarButton.classList.toggle("hidden", state.sidebarOpen);
+  openSidebarButton.setAttribute("aria-label", "Open menu");
 }
 
 function formatTimestamp(value) {
@@ -222,8 +345,8 @@ async function loadHistory() {
     if (sessions.length === 0) {
       historyList.innerHTML = `
         <div class="history-item">
-          <div class="history-item-title">No saved sessions yet</div>
-          <div class="history-item-time">End a session to store it here.</div>
+          <div class="history-item-title">No saved sessions</div>
+          <div class="history-item-time">Saved chats appear here.</div>
         </div>
       `;
       return;
@@ -240,16 +363,25 @@ async function loadHistory() {
       title.className = "history-item-title";
       title.textContent = session.title;
 
+      const metaRow = document.createElement("div");
+      metaRow.className = "history-item-tags";
+      metaRow.innerHTML = `
+        <span>${session.primary_intent || "study"}</span>
+        <span>${session.last_model_used || "local"}</span>
+        <span>${session.needs_rag ? "rag" : "no-rag"}</span>
+      `;
+
       const time = document.createElement("div");
       time.className = "history-item-time";
       time.textContent = formatTimestamp(session.created_at);
 
       openButton.appendChild(title);
+      openButton.appendChild(metaRow);
       openButton.appendChild(time);
       openButton.addEventListener("click", () => loadSession(session.id));
 
-      const exportRow = document.createElement("div");
-      exportRow.className = "history-export-row";
+      const actionRow = document.createElement("div");
+      actionRow.className = "history-action-row";
 
       const formatSelect = document.createElement("select");
       formatSelect.className = "history-format-select";
@@ -266,10 +398,17 @@ async function loadHistory() {
         downloadSessionExport(session.id, formatSelect.value);
       });
 
-      exportRow.appendChild(formatSelect);
-      exportRow.appendChild(downloadButton);
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "history-delete-button";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", () => deleteSavedSession(session.id, session.title));
+
+      actionRow.appendChild(formatSelect);
+      actionRow.appendChild(downloadButton);
+      actionRow.appendChild(deleteButton);
       card.appendChild(openButton);
-      card.appendChild(exportRow);
+      card.appendChild(actionRow);
       historyList.appendChild(card);
     });
   } catch (error) {
@@ -318,20 +457,41 @@ async function loadSession(sessionId) {
     }
 
     const session = await response.json();
+    state.currentSessionId = session.id;
     state.messages = session.messages;
+    state.orchestratorRuns = session.orchestrator_runs || [];
     renderMessages();
+    renderTrace(state.orchestratorRuns.at(-1) || session.messages.at(-1)?.orchestrator || null);
+    resetPipeline();
     setStatus(`Loaded saved session: ${session.title}`);
   } catch (error) {
     setStatus(error.message);
   }
 }
 
-function resetSession() {
-  stopSpeaking();
-  state.messages = [];
-  renderMessages();
-  resetPipeline();
-  setStatus("New unsaved session started.");
+async function deleteSavedSession(sessionId, title) {
+  const confirmed = window.confirm(`Delete the saved chat "${title}"? This cannot be undone.`);
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/sessions/${sessionId}`, { method: "DELETE" });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error(errorBody.detail || "Failed to delete the session.");
+    }
+
+    if (state.currentSessionId === sessionId) {
+      resetSession();
+      setStatus(`Deleted "${title}".`);
+    } else {
+      setStatus(`Deleted "${title}".`);
+    }
+    await loadHistory();
+  } catch (error) {
+    setStatus(error.message);
+  }
 }
 
 async function sendMessage(message) {
@@ -341,7 +501,7 @@ async function sendMessage(message) {
 
   state.requestInFlight = true;
   resetPipeline();
-  setStatus("Processing query through the NLP pipeline...", true);
+  setStatus("Processing...", true);
 
   state.messages.push({ role: "user", content: message });
   renderMessages();
@@ -362,7 +522,7 @@ async function sendMessage(message) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let assistantResponse = "";
+    let assistantPayload = null;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -384,21 +544,30 @@ async function sendMessage(message) {
         if (event.type === "stage") {
           upsertStage(event.stage);
 
-          if (event.stage.id === "intent") {
-            setActiveModel(event.stage.meta.intent, modelPill.textContent.replace("Model: ", ""));
+          if (event.stage.id === "orchestration") {
+            setActiveModel(
+              event.stage.meta.intent,
+              modelPill.textContent.replace("Model: ", ""),
+              event.stage.meta.rag_mode || "none",
+            );
           }
 
           if (event.stage.id === "routing") {
-            setActiveModel(intentPill.textContent.replace("Intent: ", ""), event.stage.meta.model);
+            setActiveModel(
+              intentPill.textContent.replace("Intent: ", ""),
+              event.stage.meta.model,
+              ragPill.textContent.replace("RAG: ", ""),
+            );
           }
 
           setStatus(`${event.stage.label}...`, event.stage.status === "running");
         }
 
         if (event.type === "final") {
-          assistantResponse = event.response;
-          setActiveModel(event.intent, event.model);
-          setStatus(`Response generated with ${event.model}. Session not yet saved.`);
+          assistantPayload = event;
+          renderTrace(event.orchestrator);
+          state.orchestratorRuns.push(event.orchestrator);
+          setStatus(`Ready. Model: ${event.model}.`);
         }
 
         if (event.type === "error") {
@@ -407,19 +576,27 @@ async function sendMessage(message) {
       });
     }
 
-    if (!assistantResponse) {
+    if (!assistantPayload) {
       throw new Error("The assistant did not return any content.");
     }
 
-    state.messages.push({ role: "assistant", content: assistantResponse });
+    state.messages.push({
+      role: "assistant",
+      content: assistantPayload.response,
+      model_used: assistantPayload.model,
+      task_type: assistantPayload.intent,
+      orchestrator: assistantPayload.orchestrator,
+    });
     renderMessages();
   } catch (error) {
     state.messages.push({
       role: "assistant",
       content: `Error: ${error.message}`,
+      model_used: "system",
+      task_type: "error",
     });
     renderMessages();
-    setStatus("The request did not complete.");
+    setStatus("Request failed.");
   } finally {
     stopSpeaking();
     state.requestInFlight = false;
@@ -428,19 +605,22 @@ async function sendMessage(message) {
 
 async function endSession() {
   if (state.messages.length === 0) {
-    setStatus("There is no active chat to save.");
+    setStatus("Nothing to save.");
     return;
   }
 
   try {
-    setStatus("Saving session...", true);
+    setStatus("Saving...", true);
 
     const response = await fetch("/sessions/end", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ messages: state.messages }),
+      body: JSON.stringify({
+        messages: state.messages,
+        orchestrator_runs: state.orchestratorRuns,
+      }),
     });
 
     if (!response.ok) {
@@ -480,6 +660,16 @@ messageInput.addEventListener("keydown", (event) => {
 
 newSessionButton.addEventListener("click", resetSession);
 endSessionButton.addEventListener("click", endSession);
+historyTabButton.addEventListener("click", () => setSidebarView("history"));
+personalizeTabButton.addEventListener("click", () => setSidebarView("personalize"));
+
+themeButtons.forEach((button) => {
+  button.addEventListener("click", () => applyTheme(button.dataset.themeOption));
+});
+
+fontSelect.addEventListener("change", (event) => {
+  applyFont(event.target.value);
+});
 
 closeSidebarButton.addEventListener("click", () => {
   state.sidebarOpen = false;
@@ -492,8 +682,10 @@ openSidebarButton.addEventListener("click", () => {
 });
 
 updateSidebarVisibility();
+initializePersonalization();
+setSidebarView("history");
 loadHistory();
 renderMessages();
 renderPipeline();
-setActiveModel();
+renderTrace(null);
 autoResizeTextarea();

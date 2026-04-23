@@ -2,23 +2,23 @@ import json
 import re
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
+from docx import Document
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
-from docx import Document
 
 from backend.chatbot import OllamaChatbot
-from backend.database import get_session, init_db, list_sessions, save_session
+from backend.database import delete_session, get_session, init_db, list_sessions, save_session
 
 
-app = FastAPI(title="Offline Ollama Chatbot API")
+app = FastAPI(title="Offline Ollama Study Assistant API")
 chatbot = OllamaChatbot()
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -48,25 +48,36 @@ class ChatResponse(BaseModel):
     response: str
     intent: str
     model: str
+    orchestrator: dict[str, Any]
 
 
 class ChatMessage(BaseModel):
     role: str = Field(..., pattern="^(user|assistant)$")
     content: str = Field(..., min_length=1)
+    model_used: str | None = None
+    task_type: str | None = None
+    orchestrator: dict[str, Any] | None = None
 
 
 class EndSessionRequest(BaseModel):
     messages: list[ChatMessage]
+    orchestrator_runs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SessionSummary(BaseModel):
     id: int
     title: str
     created_at: str
+    updated_at: str | None = None
+    pinned: int = 0
+    last_model_used: str | None = None
+    primary_intent: str | None = None
+    needs_rag: int = 0
 
 
 class SessionDetail(SessionSummary):
     messages: list[ChatMessage]
+    orchestrator_runs: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def build_transcript_lines(session: dict[str, object]) -> list[str]:
@@ -163,6 +174,11 @@ def serve_frontend() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
+@app.get("/guide")
+def serve_guide() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "guide.html")
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
     try:
@@ -171,6 +187,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             response=result["response"],
             intent=result["intent"],
             model=result["model"],
+            orchestrator=result["orchestrator"],
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -186,7 +203,7 @@ def chat(request: ChatRequest) -> ChatResponse:
 
 @app.post("/chat/stream")
 def stream_chat(request: ChatRequest) -> StreamingResponse:
-    def event_stream() -> str:
+    def event_stream():
         try:
             for event in chatbot.stream_response(request.message):
                 yield json.dumps(event) + "\n"
@@ -217,6 +234,14 @@ def get_saved_session(session_id: int) -> SessionDetail:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found.")
     return SessionDetail(**session)
+
+
+@app.delete("/sessions/{session_id}")
+def delete_saved_session(session_id: int) -> dict[str, Any]:
+    deleted = delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return {"success": True, "deleted_session_id": session_id}
 
 
 @app.get("/sessions/{session_id}/export")
@@ -250,5 +275,8 @@ def end_session(request: EndSessionRequest) -> SessionSummary:
     if not request.messages:
         raise HTTPException(status_code=400, detail="Cannot save an empty session.")
 
-    saved = save_session([message.model_dump() for message in request.messages])
+    saved = save_session(
+        [message.model_dump() for message in request.messages],
+        request.orchestrator_runs,
+    )
     return SessionSummary(**saved)

@@ -1,6 +1,0 @@
-fastapi
-uvicorn[standard]
-ollama
-pydantic
-python-docx
-reportlab

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Project Guide</title>
+    <script>
+      (() => {
+        const savedTheme = localStorage.getItem("study_theme") || "blue";
+        const savedFont = localStorage.getItem("study_font") || "aptos";
+        document.documentElement.dataset.theme = savedTheme;
+        document.documentElement.dataset.font = savedFont;
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="docs-page">
+    <main class="docs-shell">
+      <header class="docs-hero">
+        <div>
+          <p class="eyebrow">Project guide</p>
+          <h1>Study assistant architecture, workflow, and usage</h1>
+        </div>
+        <div class="docs-hero-actions">
+          <a class="meta-link" href="/">Back to app</a>
+        </div>
+      </header>
+
+      <section class="docs-grid">
+        <aside class="docs-nav-card">
+          <p class="docs-nav-title">Sections</p>
+          <nav class="docs-nav">
+            <a href="#overview">Overview</a>
+            <a href="#built">What We Built</a>
+            <a href="#workflow">Workflow</a>
+            <a href="#usage">How To Use</a>
+            <a href="#models">Models Used</a>
+            <a href="#technical">Technical Details</a>
+            <a href="#features">Features</a>
+            <a href="#files">Main Files</a>
+          </nav>
+        </aside>
+
+        <div class="docs-content">
+          <section class="docs-card" id="overview">
+            <p class="eyebrow">Overview</p>
+            <h2>What this system is</h2>
+            <p>
+              This project is a local multi-model study assistant built with FastAPI, a plain HTML/CSS/JavaScript
+              frontend, SQLite storage, and Ollama-based local model execution.
+            </p>
+            <p>
+              It accepts a user request, detects the intent, creates a task plan, routes the task to the most suitable
+              local model, streams progress to the interface, and lets the user save, reopen, export, and delete chat sessions.
+            </p>
+          </section>
+
+          <section class="docs-card" id="built">
+            <p class="eyebrow">Built</p>
+            <h2>What we made</h2>
+            <div class="docs-list">
+              <div class="docs-list-item">A local chat workspace with session history.</div>
+              <div class="docs-list-item">An orchestrator that classifies intent and assigns models.</div>
+              <div class="docs-list-item">A streaming backend that exposes execution stages to the UI.</div>
+              <div class="docs-list-item">A session system with save, load, export, and delete per chat.</div>
+              <div class="docs-list-item">A compact planner panel that shows secondary intents and task plans.</div>
+              <div class="docs-list-item">A guide page documenting the whole project.</div>
+            </div>
+          </section>
+
+          <section class="docs-card" id="workflow">
+            <p class="eyebrow">Workflow</p>
+            <h2>How the request flows</h2>
+            <div class="docs-steps">
+              <div class="docs-step">
+                <strong>1. User input</strong>
+                <p>The user enters a prompt in the chat box.</p>
+              </div>
+              <div class="docs-step">
+                <strong>2. Preprocessing</strong>
+                <p>The backend normalizes the text, tokenizes it, and extracts useful focus terms.</p>
+              </div>
+              <div class="docs-step">
+                <strong>3. Orchestration</strong>
+                <p>The orchestrator detects the main intent, optional secondary intents, task type, and whether retrieval is needed.</p>
+              </div>
+              <div class="docs-step">
+                <strong>4. Task planning</strong>
+                <p>The request is turned into one or more tasks with assigned models and execution order.</p>
+              </div>
+              <div class="docs-step">
+                <strong>5. Model routing</strong>
+                <p>The task is routed to the selected Ollama model based on intent.</p>
+              </div>
+              <div class="docs-step">
+                <strong>6. Streaming updates</strong>
+                <p>The UI receives stage updates such as intake, orchestration, routing, and final response.</p>
+              </div>
+              <div class="docs-step">
+                <strong>7. Response output</strong>
+                <p>The assistant answer is shown in the chat and can be copied, spoken, saved, or exported.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="docs-card" id="usage">
+            <p class="eyebrow">Usage</p>
+            <h2>How to use the app</h2>
+            <div class="docs-list">
+              <div class="docs-list-item">Open the app in the browser.</div>
+              <div class="docs-list-item">Type a request such as explanation, coding help, quiz, math, or summary.</div>
+              <div class="docs-list-item">Watch the planner and pipeline update while the backend processes the request.</div>
+              <div class="docs-list-item">Read the answer and use copy or speak if needed.</div>
+              <div class="docs-list-item">Click <code>End Session</code> to save the current chat.</div>
+              <div class="docs-list-item">Use the sidebar to reopen, export, or delete saved chats.</div>
+            </div>
+          </section>
+
+          <section class="docs-card" id="models">
+            <p class="eyebrow">Models</p>
+            <h2>Models used and purpose</h2>
+            <div class="docs-table">
+              <div class="docs-table-row docs-table-head">
+                <span>Intent / Task</span>
+                <span>Model</span>
+                <span>Purpose</span>
+              </div>
+              <div class="docs-table-row">
+                <span>Coding</span>
+                <span><code>qwen2.5-coder</code></span>
+                <span>Code generation, debugging, implementation help</span>
+              </div>
+              <div class="docs-table-row">
+                <span>Explanation</span>
+                <span><code>mistral</code></span>
+                <span>Concept teaching, reasoning, clear answers</span>
+              </div>
+              <div class="docs-table-row">
+                <span>Deep reasoning</span>
+                <span><code>mistral</code></span>
+                <span>Planning, comparison, retrieval-heavy or multi-step flows</span>
+              </div>
+              <div class="docs-table-row">
+                <span>Math</span>
+                <span><code>llama3</code></span>
+                <span>Math-focused problem solving in the current setup</span>
+              </div>
+              <div class="docs-table-row">
+                <span>Quiz / Summary / Rewrite / Translate</span>
+                <span><code>phi3</code></span>
+                <span>Lightweight structured and concise output tasks</span>
+              </div>
+              <div class="docs-table-row">
+                <span>Fallback</span>
+                <span><code>phi3</code></span>
+                <span>Used when a lighter safe fallback is needed</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="docs-card" id="technical">
+            <p class="eyebrow">Technical</p>
+            <h2>Technical details</h2>
+            <div class="docs-list">
+              <div class="docs-list-item">Backend framework: FastAPI.</div>
+              <div class="docs-list-item">Frontend stack: HTML, CSS, JavaScript with no frontend framework.</div>
+              <div class="docs-list-item">Database: SQLite in <code>data/chat_history.sqlite3</code>.</div>
+              <div class="docs-list-item">Inference runtime: Ollama.</div>
+              <div class="docs-list-item">Session export formats: PDF and DOCX.</div>
+              <div class="docs-list-item">Pipeline output is streamed from <code>/chat/stream</code> as newline-delimited JSON.</div>
+              <div class="docs-list-item">The backend stores messages, session metadata, and orchestrator runs.</div>
+              <div class="docs-list-item">The orchestrator uses heuristic intent scoring and task mapping.</div>
+            </div>
+          </section>
+
+          <section class="docs-card" id="features">
+            <p class="eyebrow">Features</p>
+            <h2>Current feature set</h2>
+            <div class="docs-list">
+              <div class="docs-list-item">Intent-aware model routing.</div>
+              <div class="docs-list-item">Task planning and planner trace display.</div>
+              <div class="docs-list-item">Streaming stage updates.</div>
+              <div class="docs-list-item">Saved chat history with timestamps.</div>
+              <div class="docs-list-item">Per-chat delete support.</div>
+              <div class="docs-list-item">Export saved chats to PDF or DOCX.</div>
+              <div class="docs-list-item">Clipboard copy and browser speech playback for answers.</div>
+              <div class="docs-list-item">Compact chat-first workspace UI.</div>
+            </div>
+          </section>
+
+          <section class="docs-card" id="files">
+            <p class="eyebrow">Files</p>
+            <h2>Main files and responsibility</h2>
+            <div class="docs-table">
+              <div class="docs-table-row docs-table-head">
+                <span>File</span>
+                <span>Role</span>
+                <span>Details</span>
+              </div>
+              <div class="docs-table-row">
+                <span><code>backend/main.py</code></span>
+                <span>API</span>
+                <span>Routes, streaming, exports, guide page, frontend serving</span>
+              </div>
+              <div class="docs-table-row">
+                <span><code>backend/chatbot.py</code></span>
+                <span>Execution</span>
+                <span>Pipeline, prompting, model execution, streamed stages</span>
+              </div>
+              <div class="docs-table-row">
+                <span><code>backend/orchestrator.py</code></span>
+                <span>Routing</span>
+                <span>Intent detection, task planning, model assignment</span>
+              </div>
+              <div class="docs-table-row">
+                <span><code>backend/database.py</code></span>
+                <span>Storage</span>
+                <span>Session, message, and orchestrator persistence</span>
+              </div>
+              <div class="docs-table-row">
+                <span><code>frontend/index.html</code></span>
+                <span>UI</span>
+                <span>Main chat workspace</span>
+              </div>
+              <div class="docs-table-row">
+                <span><code>frontend/app.js</code></span>
+                <span>Client logic</span>
+                <span>Streaming, state, history, planner rendering, save/delete/export actions</span>
+              </div>
+              <div class="docs-table-row">
+                <span><code>frontend/style.css</code></span>
+                <span>Styling</span>
+                <span>Workspace and guide page styles</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

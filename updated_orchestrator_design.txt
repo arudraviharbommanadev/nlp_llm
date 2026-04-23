@@ -1,0 +1,542 @@
+UPDATED ORCHESTRATOR DESIGN FOR MULTI-MODEL STUDY ASSISTANT
+
+1. PRODUCT GOAL
+
+Build a multi-model study assistant that can:
+- understand user questions deeply
+- classify one or more intents
+- break complex requests into sub-tasks
+- route each sub-task to the most suitable model
+- decide when retrieval is needed
+- support conversational study workflows
+- store, reload, export, and delete chat history per session
+- present routing and progress clearly in the UI
+
+
+2. CORE IMPROVEMENT OVER CURRENT IDEA
+
+Your current prompt is a good router prompt, but it is still too minimal for a real orchestrator. A stronger design should:
+- support multiple intents instead of only one
+- distinguish simple vs complex queries
+- detect when decomposition is necessary
+- support UI-friendly outputs
+- support database-friendly metadata
+- include retrieval strategy, not just a yes/no flag
+- include confidence and reasoning metadata for orchestration
+- support session-level actions like save, reload, export, and delete
+- prepare the system for future analytics and evaluation
+
+
+3. UPDATED ORCHESTRATOR RESPONSIBILITIES
+
+The orchestrator should:
+- classify the user request
+- identify primary and secondary intents
+- determine whether the request is direct-answer, decomposition, or multi-stage
+- decide whether internal knowledge is enough or RAG is needed
+- build a task plan
+- assign the best model for each task
+- set execution priority
+- return structured JSON only
+
+
+4. RECOMMENDED INTENT TAXONOMY
+
+Use these task types:
+- coding
+- explain
+- quiz
+- summarize
+- math
+- rag_search
+- translate
+- compare
+- rewrite
+- flashcards
+- planning
+
+This gives you better future coverage than the original smaller set.
+
+
+5. MODEL ROUTING POLICY
+
+Recommended model mapping:
+- qwen2.5:
+  use for coding, debugging, code explanation, API logic, implementation help
+- mistral:
+  use for explanations, tutoring, light reasoning, rewrite, compare, translation
+- mixtral:
+  use for long-context reasoning, multi-step decomposition, essay-length analysis, multi-document understanding
+- flan-t5:
+  use for structured quiz generation, short QA formatting, flashcards, schema-like outputs
+- deepseek-r1:
+  use for math, formal reasoning, derivation, step-by-step logic solving
+- bart/pegasus:
+  use for summarization, compression, notes-to-summary transformation
+
+Routing rules:
+- prefer the cheapest sufficient model
+- use a single model when the query is simple
+- decompose only when the task is clearly multi-intent or multi-step
+- use mixtral only when deeper reasoning or long context is actually needed
+- use RAG only when the answer depends on external or source-grounded knowledge
+
+
+6. WHEN RAG SHOULD BE USED
+
+Set `needs_rag = true` when:
+- the user asks from uploaded notes, textbook material, slides, docs, or stored knowledge base
+- the user asks for source-grounded answers
+- the query is factual and likely needs external knowledge
+- the user asks “from my notes”, “from this chapter”, “based on the document”, or similar
+- the answer must cite evidence
+
+Set `needs_rag = false` when:
+- the task is generic coding
+- the task is pure explanation from general knowledge
+- the task is summarization of already supplied text
+- the task is math solving from the prompt itself
+- the task is translation or quiz generation from provided input
+
+Recommended improvement:
+- instead of only `needs_rag`, also output `rag_mode`
+- possible values:
+  `none`, `local_notes`, `web`, `hybrid`
+
+
+7. IMPROVED OUTPUT JSON DESIGN
+
+Use this richer JSON shape:
+
+{
+  "query_type": "simple | complex | multi_intent",
+  "primary_intent": "explain",
+  "secondary_intents": ["quiz"],
+  "needs_rag": false,
+  "rag_mode": "none",
+  "response_strategy": "direct | decompose | retrieve_then_answer",
+  "tasks": [
+    {
+      "task_id": "task_1",
+      "task_type": "explain",
+      "model": "mistral",
+      "query": "Explain photosynthesis in simple terms for a class 10 student.",
+      "priority": 1,
+      "depends_on": []
+    }
+  ],
+  "final_aggregation_model": "mistral"
+}
+
+Why this is better:
+- easier for backend orchestration
+- easier for frontend progress display
+- easier for debugging
+- easier to save in the database
+
+
+8. UPDATED MASTER ORCHESTRATOR PROMPT
+
+Use this as the improved system prompt:
+
+You are an AI Orchestrator Agent for a multi-model study assistant system.
+
+Your responsibilities are to:
+1. deeply understand the user's query
+2. identify the primary and secondary intents
+3. decide whether the request is simple, complex, or multi-intent
+4. break the request into sub-tasks when necessary
+5. assign the best available model for each task
+6. decide whether retrieval is required
+7. return ONLY valid JSON with no explanation
+
+Available capabilities:
+- coding
+- explain
+- quiz
+- summarize
+- math
+- rag_search
+- translate
+- compare
+- rewrite
+- flashcards
+- planning
+
+Available models:
+- qwen2.5: coding, debugging, implementation, code understanding
+- mistral: explanation, tutoring, general reasoning, rewrite, compare, translation
+- mixtral: deep reasoning, long context, complex decomposition
+- flan-t5: structured quiz generation, flashcards, short QA
+- deepseek-r1: math, equations, logic, step-by-step reasoning
+- bart/pegasus: summarization and compression
+
+Routing rules:
+- always choose the most efficient model that can solve the task well
+- decompose complex or multi-intent requests into multiple tasks
+- use a single task for simple requests
+- use retrieval only when the task needs source-grounded or external knowledge
+- if retrieval is needed, include a rag_search task before answer-generation tasks
+- if multiple tasks exist, order them by priority
+- include dependencies when one task depends on another
+- output valid JSON only
+
+Return JSON in exactly this format:
+{
+  "query_type": "simple | complex | multi_intent",
+  "primary_intent": "string",
+  "secondary_intents": ["string"],
+  "needs_rag": true,
+  "rag_mode": "none | local_notes | web | hybrid",
+  "response_strategy": "direct | decompose | retrieve_then_answer",
+  "tasks": [
+    {
+      "task_id": "task_1",
+      "task_type": "string",
+      "model": "string",
+      "query": "string",
+      "priority": 1,
+      "depends_on": []
+    }
+  ],
+  "final_aggregation_model": "string"
+}
+
+
+9. EXAMPLE ORCHESTRATOR OUTPUTS
+
+Example A: Simple explanation
+{
+  "query_type": "simple",
+  "primary_intent": "explain",
+  "secondary_intents": [],
+  "needs_rag": false,
+  "rag_mode": "none",
+  "response_strategy": "direct",
+  "tasks": [
+    {
+      "task_id": "task_1",
+      "task_type": "explain",
+      "model": "mistral",
+      "query": "Explain Newton's first law in simple terms.",
+      "priority": 1,
+      "depends_on": []
+    }
+  ],
+  "final_aggregation_model": "mistral"
+}
+
+Example B: Multi-intent study request
+{
+  "query_type": "multi_intent",
+  "primary_intent": "explain",
+  "secondary_intents": ["quiz", "summarize"],
+  "needs_rag": false,
+  "rag_mode": "none",
+  "response_strategy": "decompose",
+  "tasks": [
+    {
+      "task_id": "task_1",
+      "task_type": "explain",
+      "model": "mistral",
+      "query": "Explain photosynthesis in a simple student-friendly way.",
+      "priority": 1,
+      "depends_on": []
+    },
+    {
+      "task_id": "task_2",
+      "task_type": "summarize",
+      "model": "bart/pegasus",
+      "query": "Summarize the explanation into concise revision notes.",
+      "priority": 2,
+      "depends_on": ["task_1"]
+    },
+    {
+      "task_id": "task_3",
+      "task_type": "quiz",
+      "model": "flan-t5",
+      "query": "Generate 5 MCQs based on the explanation.",
+      "priority": 3,
+      "depends_on": ["task_1"]
+    }
+  ],
+  "final_aggregation_model": "mistral"
+}
+
+Example C: Retrieval-based query
+{
+  "query_type": "complex",
+  "primary_intent": "rag_search",
+  "secondary_intents": ["explain"],
+  "needs_rag": true,
+  "rag_mode": "local_notes",
+  "response_strategy": "retrieve_then_answer",
+  "tasks": [
+    {
+      "task_id": "task_1",
+      "task_type": "rag_search",
+      "model": "mixtral",
+      "query": "Retrieve relevant notes about operating systems deadlocks from the student's stored material.",
+      "priority": 1,
+      "depends_on": []
+    },
+    {
+      "task_id": "task_2",
+      "task_type": "explain",
+      "model": "mistral",
+      "query": "Explain deadlocks clearly using the retrieved study material.",
+      "priority": 2,
+      "depends_on": ["task_1"]
+    }
+  ],
+  "final_aggregation_model": "mistral"
+}
+
+
+10. COMPLETE UI DESIGN
+
+The UI should move from a basic chatbot to a study workspace.
+
+Main layout
+- Left sidebar:
+  chat history, saved sessions, search history, delete per chat, export controls
+- Center panel:
+  chat conversation
+- Right panel or top insights bar:
+  orchestrator output, detected intents, chosen models, pipeline stage progress, RAG status
+
+Recommended screens and components
+
+A. Main Chat Workspace
+- message composer
+- send button
+- new chat button
+- end/save session button
+- clear current session button
+- active model pills
+- intent pills
+- RAG status pill
+- live pipeline progress cards
+
+B. History Sidebar
+- session list
+- timestamp
+- session title
+- quick open
+- export dropdown
+- delete button per chat
+- confirm delete modal
+- search box for saved history
+
+C. Orchestrator Trace Panel
+- user query
+- classified query type
+- primary intent
+- secondary intents
+- task plan
+- selected model for each task
+- whether RAG was triggered
+- final aggregation model
+
+D. Study Tools Panel
+- summarize this answer
+- generate quiz
+- translate
+- create flashcards
+- explain simpler
+- compare with previous topic
+
+Better UX ideas
+- show “why this model was chosen” in a tooltip
+- show per-task execution status
+- allow user to rerun only one task
+- allow pinning important chats
+- allow renaming saved sessions
+- show icons for explain, coding, quiz, summarize, math
+- mobile-friendly collapsible panels
+
+
+11. DELETE HISTORY PER CHAT
+
+This should be added both in backend and UI.
+
+Backend API addition
+- add endpoint:
+  `DELETE /sessions/{session_id}`
+
+Behavior
+- delete only the selected saved chat
+- return success JSON
+- if session does not exist, return 404
+
+Recommended response
+{
+  "success": true,
+  "deleted_session_id": 12
+}
+
+Frontend behavior
+- each saved session card gets a delete icon/button
+- clicking delete opens a confirmation modal
+- after confirmation:
+  call `DELETE /sessions/{session_id}`
+- remove the deleted chat from sidebar immediately
+- if the currently open saved session is deleted:
+  clear it from the main panel and show a neutral state message
+
+UX protection
+- require confirmation before deletion
+- use clear destructive styling
+- optionally support undo for a few seconds later
+
+
+12. DATABASE DESIGN IMPROVEMENTS
+
+Your current database works, but it is minimal. For a study assistant, use a richer schema.
+
+Recommended `chat_sessions` table
+- id
+- title
+- created_at
+- updated_at
+- session_type
+- pinned
+- last_model_used
+- primary_intent
+- needs_rag
+
+Recommended `chat_messages` table
+- id
+- session_id
+- role
+- content
+- model_used
+- task_type
+- created_at
+- message_index
+
+Recommended `orchestrator_runs` table
+- id
+- session_id
+- user_message_id
+- query_type
+- primary_intent
+- secondary_intents_json
+- needs_rag
+- rag_mode
+- response_strategy
+- final_aggregation_model
+- tasks_json
+- created_at
+
+Why this is better
+- easier to track which model handled what
+- easier to debug routing quality
+- easier to build analytics
+- easier to show orchestrator trace in the UI
+- easier to support delete, export, filtering, and future dashboards
+
+
+13. BACKEND ARCHITECTURE DESIGN
+
+Recommended backend flow:
+1. receive user message
+2. store user message in database
+3. send user message to orchestrator
+4. parse orchestrator JSON
+5. if `needs_rag` is true, run retrieval step
+6. execute each task in order of priority
+7. aggregate outputs if needed
+8. stream intermediate task updates to frontend
+9. store assistant response plus orchestration metadata
+10. return final response
+
+Recommended modules
+- `orchestrator.py`
+  handles prompt, intent classification, decomposition, task planning
+- `router.py`
+  dispatches tasks to selected models
+- `rag.py`
+  retrieval logic for notes/docs/web
+- `executor.py`
+  executes multi-step plans and handles dependencies
+- `database.py`
+  stores sessions, messages, orchestrator traces
+- `main.py`
+  FastAPI endpoints and streaming
+
+
+14. STREAMING DESIGN
+
+For a better UI, stream stages like this:
+- intake
+- orchestration
+- retrieval
+- task_execution
+- aggregation
+- final_response
+
+Each event should include:
+- stage id
+- label
+- status
+- model
+- detail
+- task_id if applicable
+
+This makes the UI much more understandable than only showing one final model.
+
+
+15. UPDATED FUNCTIONALITY LIST FOR THE FINAL SYSTEM
+
+- multi-intent orchestration
+- task decomposition
+- dynamic model routing
+- RAG decision support
+- local notes or document retrieval
+- per-task execution plan
+- task dependency handling
+- response aggregation
+- streaming progress visualization
+- save chat history
+- export chat history
+- delete chat history per session
+- rename chat sessions
+- pin important sessions
+- orchestrator trace view
+- model usage metadata tracking
+
+
+16. BEST PRACTICAL VERSION TO BUILD FIRST
+
+Phase 1
+- improved orchestrator JSON
+- model routing
+- save/load history
+- delete single chat
+- better UI for history and pipeline
+
+Phase 2
+- orchestrator trace panel
+- richer database tables
+- per-message metadata
+- rename and pin sessions
+
+Phase 3
+- local RAG over notes/documents
+- quiz and flashcard tools
+- search over history
+- analytics dashboard
+
+
+17. FINAL RECOMMENDATION
+
+If you want the strongest version for Codex in VS Code, do not give only the small JSON-routing prompt.
+Give Codex:
+- the improved orchestrator prompt
+- the target backend architecture
+- the target database schema
+- the UI requirements
+- the delete-history requirement
+
+That will help Codex generate a much more complete system instead of only a classifier.

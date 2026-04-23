@@ -1,0 +1,126 @@
+CURRENT WORKFLOW AND FUNCTIONALITIES
+
+Project overview
+- This project is an offline local AI workspace built with FastAPI, a browser frontend, SQLite storage, and Ollama for local model inference.
+- The system routes user prompts based on intent.
+- `mistral` is used for content generation and general text-first responses.
+- `qwen2.5-coder` is used for coding-related prompts.
+- `mistral` is also the fallback model if a specific route is not selected.
+
+High-level workflow
+1. The user opens the web app served by the FastAPI backend.
+2. The frontend loads chat history from the SQLite database and shows any saved sessions in the sidebar.
+3. The user enters a message in the chat composer and submits it.
+4. The frontend sends the message to `POST /chat/stream`.
+5. The backend preprocesses the message, analyzes intent, selects a model, builds context, and starts generation.
+6. The backend streams pipeline stage updates as newline-delimited JSON.
+7. The frontend updates the live pipeline cards and active intent/model indicators while the response is being prepared.
+8. When generation finishes, the assistant response is added to the current unsaved chat session.
+9. The user can start a new temporary session or end the session to save it permanently.
+10. Saved sessions can later be reopened or exported as PDF or DOCX.
+
+Backend workflow
+- Application startup:
+  The FastAPI app initializes the SQLite database on startup.
+- Frontend hosting:
+  The backend serves `frontend/index.html` at `/` and static assets from `/static`.
+- Health check:
+  `GET /health` returns a simple status response.
+- Chat processing:
+  `POST /chat` returns a full non-streaming response with `response`, `intent`, and `model`.
+- Streaming chat processing:
+  `POST /chat/stream` streams stage-by-stage progress updates and then the final answer.
+- Session management:
+  The backend lists sessions, loads a specific saved session, saves the current session, and exports saved sessions.
+
+NLP pipeline stages
+- Query intake:
+  Accepts the user prompt and starts processing.
+- Text preprocessing:
+  Normalizes whitespace, lowercases text, tokenizes content, and extracts the top keywords.
+- Intent analysis:
+  Scores the prompt as either coding or subjective/content-focused using keyword matches and code-like markers.
+- Model routing:
+  Chooses `qwen2.5-coder` for coding intent and `mistral` for subjective/content intent.
+- Knowledge base analysis:
+  Builds a short context summary based on extracted focus terms.
+- Embedding analysis:
+  Creates a lightweight semantic fingerprint preview from focus terms.
+- Response generation:
+  Builds a system prompt and sends the request to the selected Ollama model.
+
+Model routing logic
+- Coding prompts are identified through terms such as `code`, `debug`, `function`, `python`, `json`, `sql`, `api`, and similar technical markers.
+- Prompts containing code-like structures such as `def`, `class`, triple backticks, braces, or implementation phrases get extra coding weight.
+- Content-first prompts are identified through terms such as `explain`, `essay`, `summary`, `opinion`, `story`, `describe`, and related subjective language.
+- If coding score is higher than text score, the system uses `qwen2.5-coder`.
+- Otherwise, the system uses `mistral`.
+
+Frontend workflow
+- The chat UI keeps an in-memory `state` object for:
+  messages, pipeline stages, sidebar visibility, and whether a request is in flight.
+- When a message is submitted:
+  The user message is immediately added to the chat log before the streamed response completes.
+- While the stream is active:
+  The UI updates pipeline cards in a fixed order and updates the intent/model pills in the header.
+- After the final event:
+  The assistant message is appended to the chat log and the status text is updated.
+- If an error happens:
+  The UI appends an assistant error message and shows an error status.
+
+Session and history workflow
+- The current chat stays temporary until the user clicks `End Session`.
+- `End Session` sends all current messages to `POST /sessions/end`.
+- The backend generates a session title from the first user message, limited to 48 characters.
+- Sessions are stored in SQLite as JSON transcripts with a created timestamp.
+- The sidebar loads saved sessions from `GET /sessions`.
+- Clicking a saved session loads its transcript through `GET /sessions/{session_id}`.
+- Clicking `New Session` clears the current unsaved chat from the UI without saving it.
+
+Export workflow
+- Saved sessions can be exported in two formats:
+  PDF and DOCX.
+- Export requests are sent to `GET /sessions/{session_id}/export?format=pdf|docx`.
+- PDF export uses ReportLab and wraps long lines across pages.
+- DOCX export uses python-docx and structures the content with headings and paragraphs.
+- Downloaded files use a sanitized version of the saved session title as the filename.
+
+Current functionality list
+- Offline local inference through Ollama.
+- Intent-aware routing between text/content and coding models.
+- Streaming pipeline visualization in the frontend.
+- Live display of detected intent and selected model.
+- Chat conversation interface in the browser.
+- Copy button for assistant responses.
+- Speak button for assistant responses using browser speech synthesis.
+- Temporary current session handling.
+- Persistent saved chat history in SQLite.
+- Saved session sidebar with timestamps.
+- Load previous saved conversations.
+- Export saved conversations to PDF.
+- Export saved conversations to DOCX.
+- Health endpoint for service checks.
+
+Important implementation details
+- The backend prefers the Python Ollama library if available.
+- If the Ollama Python library is unavailable, it falls back to running `ollama run` through a subprocess.
+- The database file is stored at `data/chat_history.sqlite3`.
+- CORS is enabled broadly for the FastAPI app.
+- The frontend is a plain HTML, CSS, and JavaScript application with no frontend framework.
+
+Current main files involved
+- `backend/main.py`:
+  API routes, streaming responses, exports, and frontend serving.
+- `backend/chatbot.py`:
+  preprocessing, intent analysis, routing, prompt construction, and model generation.
+- `backend/database.py`:
+  SQLite initialization, save/load/list session logic.
+- `frontend/index.html`:
+  app layout, sidebar, pipeline area, chat log, and session buttons.
+- `frontend/app.js`:
+  client-side state, streaming handling, history loading, exports, copy/speak features, and session actions.
+
+Summary
+- The current system is a local offline chatbot workspace with intent-based model routing.
+- It uses `mistral` for content generation and `qwen2.5-coder` for coding.
+- It provides live pipeline visibility, persistent session history, and export support for saved conversations.

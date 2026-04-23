@@ -1,0 +1,1 @@
+add document, pdf and text file parsing and data extraction features, image reading features and required models to summarize images and describing them, like image cationing, summerizing, detecting the scenes
